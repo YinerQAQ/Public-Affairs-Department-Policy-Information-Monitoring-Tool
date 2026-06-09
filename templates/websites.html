@@ -1,0 +1,145 @@
+{% extends 'base.html' %}
+{% set active_page = 'websites' %}
+{% block title %}网址管理{% endblock %}
+
+{% block page_actions %}
+<button type="button" class="btn btn-primary" id="btn-add-website">+ 添加网站</button>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="panel-body panel-body-flat">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th class="col-index">#</th>
+                    <th>网站名称</th>
+                    <th>URL</th>
+                    <th class="col-level">级别</th>
+                    <th>栏目 / 按钮</th>
+                    <th class="col-status">状态</th>
+                    <th class="col-date">最后爬取</th>
+                    <th class="col-actions">操作</th>
+                </tr>
+            </thead>
+            <tbody id="websites-tbody">
+                {% if websites %}
+                {% for site in websites %}
+                <tr data-id="{{ site.id }}"
+                    data-name="{{ site.name }}"
+                    data-url="{{ site.url }}"
+                    data-level="{{ site.level }}"
+                    data-buttons="{{ site.buttons_list | join(',') }}">
+                    <td class="col-index">{{ loop.index }}</td>
+                    <td class="cell-name">{{ site.name }}</td>
+                    <td>
+                        <a class="row-link" href="{{ site.url }}" target="_blank" rel="noopener">
+                            {{ site.url }}
+                        </a>
+                    </td>
+                    <td>
+                        <span class="badge badge-level badge-level-{{ site.level }}">{{ site.level }}</span>
+                    </td>
+                    <td>
+                        {% for btn in site.buttons_list %}
+                        <span class="badge badge-keyword">{{ btn }}</span>
+                        {% else %}<span class="muted">-</span>{% endfor %}
+                    </td>
+                    <td>
+                        <span class="status-dot status-dot-{{ site.runtime_status }}"></span>
+                        <span class="muted">
+                            {% if site.runtime_status == 'success' %}正常
+                            {% elif site.runtime_status == 'error' %}异常
+                            {% else %}待运行{% endif %}
+                        </span>
+                    </td>
+                    <td class="muted">{{ site.last_crawl_time or '尚未爬取' }}</td>
+                    <td class="col-actions">
+                        <button type="button" class="btn btn-mini btn-ghost btn-edit-website">编辑</button>
+                        <button type="button" class="btn btn-mini btn-danger btn-delete-website">删除</button>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% else %}
+                <tr>
+                    <td colspan="8">
+                        <div class="empty-state">
+                            <div class="empty-icon">∅</div>
+                            <p>尚未配置任何监控网站，点击右上角"添加网站"开始。</p>
+                        </div>
+                    </td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<div class="modal-mask" id="website-modal" hidden>
+    <div class="modal">
+        <div class="modal-header">
+            <h2 id="website-modal-title">添加网站</h2>
+            <button type="button" class="modal-close" data-modal-close>×</button>
+        </div>
+        <form id="form-website" class="modal-body">
+            <input type="hidden" name="id" value="">
+            <div class="form-field">
+                <label>网站名称 <span class="required">*</span></label>
+                <input type="text" name="name" required maxlength="80"
+                       placeholder="例如：四川省经信厅官网">
+            </div>
+            <div class="form-field">
+                <label>URL <span class="required">*</span></label>
+                <input type="url" name="url" required placeholder="https://...">
+            </div>
+            <div class="form-field">
+                <label>级别</label>
+                <select name="level">
+                    <option value="国家">国家</option>
+                    <option value="省">省</option>
+                    <option value="市">市</option>
+                </select>
+            </div>
+            <div class="form-field">
+                <label>点击栏目名称</label>
+                <input type="text" name="buttons" id="input-buttons"
+                       placeholder="例如：通知公告,公告公示">
+                <div class="field-hint">
+                    输入网站上需要点击的栏目名称，多个用逗号分隔（如：通知公告,公告公示）。
+                    爬虫会根据这些名称在网站首页查找对应链接。
+                </div>
+                <div class="suggest-row" id="buttons-suggest">
+                    <span class="suggest-label">快速添加：</span>
+                    {% for s in [
+                        '通知公告','公告公示','政策文件','政策解读','最新政策',
+                        '工作通知','通知','项目申报','公开公示',
+                        '产业政策','双公示','政策日历'
+                    ] %}
+                    <button type="button" class="suggest-chip" data-value="{{ s }}">{{ s }}</button>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-ghost" data-modal-close>取消</button>
+                <button type="submit" class="btn btn-primary">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="modal-mask" id="confirm-modal" hidden>
+    <div class="modal modal-sm">
+        <div class="modal-header">
+            <h2>确认操作</h2>
+            <button type="button" class="modal-close" data-modal-close>×</button>
+        </div>
+        <div class="modal-body">
+            <p id="confirm-message">确定执行该操作吗？</p>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-ghost" data-modal-close>取消</button>
+                <button type="button" class="btn btn-danger" id="confirm-ok">确定</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

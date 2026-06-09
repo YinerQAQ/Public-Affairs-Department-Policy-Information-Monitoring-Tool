@@ -1,0 +1,203 @@
+{% extends 'base.html' %}
+{% set active_page = 'index' %}
+{% block title %}仪表盘{% endblock %}
+
+{% block page_actions %}
+<button type="button" class="btn btn-ghost" id="btn-toggle-crawl-panel">
+    <span class="btn-icon">▸</span> 爬取控制台
+</button>
+<button type="button" class="btn btn-primary" id="btn-trigger-crawl-all">
+    手动爬取全部
+</button>
+{% endblock %}
+
+{% block content %}
+<div class="stat-grid">
+    <div class="stat-card stat-blue">
+        <div class="stat-label">今日新增</div>
+        <div class="stat-value">{{ stats.today }}</div>
+        <div class="stat-hint">条政策动态</div>
+    </div>
+    <div class="stat-card stat-green">
+        <div class="stat-label">本周新增</div>
+        <div class="stat-value">{{ stats.week }}</div>
+        <div class="stat-hint">最近 7 天</div>
+    </div>
+    <div class="stat-card stat-orange">
+        <div class="stat-label">总条目数</div>
+        <div class="stat-value">{{ stats.total }}</div>
+        <div class="stat-hint">累计采集</div>
+    </div>
+    <div class="stat-card stat-purple">
+        <div class="stat-label">监控网站</div>
+        <div class="stat-value">{{ stats.sites }}</div>
+        <div class="stat-hint">每 {{ crawl_interval }} 小时刷新</div>
+    </div>
+</div>
+
+<!-- 爬取控制台 -->
+<section class="panel crawl-panel" id="crawl-control-panel" hidden>
+    <div class="panel-header">
+        <h2>爬取控制台</h2>
+        <span class="muted">选择网站与时间范围，后台运行。</span>
+    </div>
+    <div class="panel-body">
+        <form id="form-crawl" class="crawl-form" autocomplete="off">
+            <div class="crawl-group-row">
+                {% for level_name, sites in sites_grouped.items() %}
+                {% if sites %}
+                <div class="crawl-group" data-level="{{ level_name }}">
+                    <div class="crawl-group-head">
+                        <span class="badge badge-level badge-level-{{ level_name }}">{{ level_name }}</span>
+                        <span class="crawl-group-count">{{ sites|length }} 个网站</span>
+                        <label class="crawl-group-all">
+                            <input type="checkbox" class="chk-group-all"
+                                   data-level="{{ level_name }}"> 全选
+                        </label>
+                    </div>
+                    <div class="crawl-group-body">
+                        {% for site in sites %}
+                        <label class="crawl-site-item">
+                            <input type="checkbox" class="chk-site"
+                                   name="websites" value="{{ site.name }}"
+                                   data-level="{{ level_name }}">
+                            <span class="crawl-site-name" title="{{ site.name }}">{{ site.name }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+
+            <div class="crawl-options-row">
+                <div class="filter-item">
+                    <label>开始日期</label>
+                    <input type="date" name="date_from" id="crawl-date-from">
+                    <small style="color: #999;">不选择日期则默认爬取全部时间段</small>
+                </div>
+                <div class="filter-item">
+                    <label>结束日期</label>
+                    <input type="date" name="date_to" id="crawl-date-to">
+                    <small style="color: #999;">不选择日期则默认爬取全部时间段</small>
+                </div>
+                <div class="crawl-tip muted">
+                    只保留发布日期在范围内的文章；留空表示不限。
+                </div>
+                <div class="crawl-actions">
+                    <button type="button" class="btn btn-ghost" id="btn-crawl-selective">
+                        爬取选中
+                    </button>
+                    <button type="button" class="btn btn-primary" id="btn-crawl-all-with-range">
+                        爬取全部
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</section>
+
+<!-- 爬取进度 -->
+<section class="panel progress-panel" id="crawl-progress-panel" hidden>
+    <div class="panel-header">
+        <h2>爬取进度
+            <span class="progress-status-badge" id="progress-status-badge">运行中</span>
+        </h2>
+        <span class="muted" id="progress-summary"></span>
+    </div>
+    <div class="panel-body">
+        <div id="crawl-config-info" style="display: none; margin-bottom: 12px; padding: 10px; background: #f0f5ff; border: 1px solid #d6e4ff; border-radius: 4px; font-size: 13px;">
+            <div style="margin-bottom: 4px;">
+                <strong>爬取范围：</strong><span id="config-mode"></span>
+            </div>
+            <div id="config-websites-row" style="margin-bottom: 4px; display: none;">
+                <strong>选中网站：</strong><span id="config-websites"></span>
+            </div>
+            <div id="config-date-row" style="display: none;">
+                <strong>时间范围：</strong><span id="config-dates"></span>
+            </div>
+        </div>
+        <div class="progress-bar-wrapper">
+            <div class="progress-bar">
+                <div class="progress-bar-fill" id="progress-bar-fill" style="width:0%"></div>
+                <span class="progress-bar-label" id="progress-bar-label">0 / 0</span>
+            </div>
+        </div>
+        <div class="progress-current" id="progress-current"></div>
+        <div id="crawl-control-btns" style="display: none; margin-top: 12px; gap: 10px;">
+            <button id="btn-pause-crawl" class="btn" type="button"
+                    style="background: #faad14; color: #fff; border: none;">
+                ⏸ 暂停爬取
+            </button>
+            <button id="btn-cancel-crawl" class="btn" type="button"
+                    style="background: #ff4d4f; color: #fff; border: none;">
+                ⏹ 取消爬取
+            </button>
+        </div>
+        <ul class="progress-result-list" id="progress-result-list"></ul>
+    </div>
+</section>
+
+<div class="dashboard-row">
+    <section class="panel panel-flex2">
+        <div class="panel-header">
+            <h2>最新动态</h2>
+            <a class="link-more" href="{{ url_for('results') }}">查看全部 →</a>
+        </div>
+        <div class="panel-body">
+            {% if latest_articles %}
+            <ul class="article-list">
+                {% for item in latest_articles %}
+                <li class="article-item">
+                    <a class="article-title" href="{{ item.url }}" target="_blank" rel="noopener">
+                        {{ item.title }}
+                    </a>
+                    <div class="article-meta">
+                        <span class="meta-source">{{ item.source_name or '-' }}</span>
+                        <span class="meta-divider">·</span>
+                        <span class="meta-date">{{ item.publish_date or item.crawl_time or '-' }}</span>
+                        {% if item.level %}
+                        <span class="badge badge-level badge-level-{{ item.level }}">{{ item.level }}</span>
+                        {% endif %}
+                        {% for kw in item.matched_keywords_list %}
+                        <span class="badge badge-keyword">{{ kw }}</span>
+                        {% endfor %}
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <div class="empty-state">
+                <div class="empty-icon">∅</div>
+                <p>暂无爬取数据，点击右上角“手动爬取全部”开始采集。</p>
+            </div>
+            {% endif %}
+        </div>
+    </section>
+
+    <section class="panel panel-flex1">
+        <div class="panel-header">
+            <h2>网站状态</h2>
+            <span class="link-more muted" id="status-updated-at">自动刷新</span>
+        </div>
+        <div class="panel-body">
+            <div class="site-status-grid" id="site-status-grid">
+                {% for site in site_status %}
+                <div class="site-card status-{{ site.status }}" data-name="{{ site.name }}">
+                    <div class="site-card-head">
+                        <span class="status-dot status-dot-{{ site.status }}"></span>
+                        <span class="site-name" title="{{ site.name }}">{{ site.name }}</span>
+                    </div>
+                    <div class="site-card-meta">
+                        <span class="badge badge-level badge-level-{{ site.level }}">{{ site.level }}</span>
+                        <span class="muted">
+                            {{ site.last_crawl_time if site.last_crawl_time else '尚未爬取' }}
+                        </span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+</div>
+{% endblock %}

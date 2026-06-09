@@ -1,0 +1,183 @@
+{% extends 'base.html' %}
+{% set active_page = 'results' %}
+{% block title %}爬取结果{% endblock %}
+
+{% block page_actions %}
+<span class="muted">共 {{ total }} 条记录</span>
+<button type="button" class="btn btn-ghost" id="btn-export-csv">
+    <span class="btn-icon">↓</span> 导出 CSV
+</button>
+<button type="button" class="btn btn-primary" id="btn-export-excel">
+    <span class="btn-icon">↓</span> 导出 Excel
+</button>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="panel-body">
+        <form class="filter-form" method="get" action="{{ url_for('results') }}" id="results-filter-form">
+            <div class="filter-row">
+                <div class="filter-item">
+                    <label>来源网站</label>
+                    <select name="source">
+                        <option value="">全部网站</option>
+                        {% for site in websites %}
+                        <option value="{{ site.name }}"
+                            {% if filters.source == site.name %}selected{% endif %}>
+                            {{ site.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="filter-item">
+                    <label>级别</label>
+                    <select name="level">
+                        <option value="">全部</option>
+                        <option value="国家" {% if filters.level == '国家' %}selected{% endif %}>国家</option>
+                        <option value="省" {% if filters.level == '省' %}selected{% endif %}>省</option>
+                        <option value="市" {% if filters.level == '市' %}selected{% endif %}>市</option>
+                    </select>
+                </div>
+                <div class="filter-item">
+                    <label>开始日期</label>
+                    <input type="date" name="date_from" value="{{ filters.date_from }}">
+                    <small style="color: #999;">不选则默认全部时间</small>
+                </div>
+                <div class="filter-item">
+                    <label>结束日期</label>
+                    <input type="date" name="date_to" value="{{ filters.date_to }}">
+                    <small style="color: #999;">不选则默认全部时间</small>
+                </div>
+                <div class="filter-item filter-item-grow">
+                    <label>关键词</label>
+                    <input type="text" name="keyword" placeholder="标题 / 摘要 / 匹配关键词"
+                           value="{{ filters.keyword }}">
+                </div>
+                <div class="filter-actions">
+                    <button type="submit" class="btn btn-primary">筛选</button>
+                    <a class="btn btn-ghost" href="{{ url_for('results') }}">重置</a>
+                </div>
+            </div>
+        </form>
+    </div>
+</section>
+
+<section class="panel" style="border-color: #ff4d4f; border: 1px solid #ff4d4f;">
+    <div class="panel-body">
+        <h3 style="color: #ff4d4f; margin: 0 0 12px 0; font-size: 15px;">数据管理</h3>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <button class="btn btn-danger" onclick="deleteArticles('filtered')">
+                清除筛选结果
+            </button>
+            <button class="btn btn-danger" onclick="deleteArticles('no_keywords')">
+                清除无关键词数据
+            </button>
+            <button class="btn btn-danger" onclick="deleteArticles('all')" style="background: #ff4d4f; color: #fff;">
+                清除全部数据
+            </button>
+        </div>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="panel-body panel-body-flat">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th class="col-index">#</th>
+                    <th>标题</th>
+                    <th class="col-source">来源</th>
+                    <th class="col-level">级别</th>
+                    <th class="col-date">发布日期</th>
+                    <th class="col-keywords">匹配关键词</th>
+                    <th class="col-action">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if articles %}
+                {% for item in articles %}
+                <tr id="article-row-{{ item.id }}">
+                    <td class="col-index">{{ (page - 1) * per_page + loop.index }}</td>
+                    <td>
+                        <a class="row-title" href="{{ item.url }}" target="_blank" rel="noopener">
+                            {{ item.title }}
+                        </a>
+                        {% if item.summary %}
+                        <div class="row-summary">{{ item.summary[:80] }}{% if item.summary|length > 80 %}…{% endif %}</div>
+                        {% endif %}
+                    </td>
+                    <td>{{ item.source_name or '-' }}</td>
+                    <td>
+                        {% if item.level %}
+                        <span class="badge badge-level badge-level-{{ item.level }}">{{ item.level }}</span>
+                        {% else %}-{% endif %}
+                    </td>
+                    <td>{{ item.publish_date or '-' }}</td>
+                    <td>
+                        {% for kw in item.matched_keywords_list %}
+                        <span class="badge badge-keyword">{{ kw }}</span>
+                        {% else %}-{% endfor %}
+                    </td>
+                    <td>
+                        <button class="btn-sm btn-danger" onclick="deleteSingleArticle({{ item.id }})">
+                            删除
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% else %}
+                <tr>
+                    <td colspan="7">
+                        <div class="empty-state">
+                            <div class="empty-icon">∅</div>
+                            <p>没有匹配的记录，可调整筛选条件后重试。</p>
+                        </div>
+                    </td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+{% if total_pages > 1 %}
+<nav class="pagination">
+    {% macro page_link(p, label=None, disabled=False, current=False) -%}
+        {% if disabled %}
+            <span class="page-item disabled">{{ label or p }}</span>
+        {% elif current %}
+            <span class="page-item current">{{ label or p }}</span>
+        {% else %}
+            <a class="page-item" href="{{ url_for('results',
+                source=filters.source, level=filters.level,
+                date_from=filters.date_from, date_to=filters.date_to,
+                keyword=filters.keyword, page=p) }}">{{ label or p }}</a>
+        {% endif %}
+    {%- endmacro %}
+
+    {{ page_link(page - 1, label='上一页', disabled=(page <= 1)) }}
+
+    {% set start_p = [page - 2, 1] | max %}
+    {% set end_p = [start_p + 4, total_pages] | min %}
+    {% set start_p = [end_p - 4, 1] | max %}
+
+    {% if start_p > 1 %}
+        {{ page_link(1) }}
+        {% if start_p > 2 %}<span class="page-item disabled">…</span>{% endif %}
+    {% endif %}
+
+    {% for p in range(start_p, end_p + 1) %}
+        {{ page_link(p, current=(p == page)) }}
+    {% endfor %}
+
+    {% if end_p < total_pages %}
+        {% if end_p < total_pages - 1 %}<span class="page-item disabled">…</span>{% endif %}
+        {{ page_link(total_pages) }}
+    {% endif %}
+
+    {{ page_link(page + 1, label='下一页', disabled=(page >= total_pages)) }}
+
+    <span class="page-info muted">第 {{ page }} / {{ total_pages }} 页</span>
+</nav>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+{% set active_page = 'keywords' %}
+{% block title %}关键词管理{% endblock %}
+
+{% block page_actions %}
+<span class="muted">共 {{ total }} 个关键词</span>
+{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="panel-header">
+        <h2>添加关键词</h2>
+        <span class="muted">支持单个或批量（用英文逗号 , 分隔）</span>
+    </div>
+    <div class="panel-body">
+        <form id="form-add-keyword" class="filter-form">
+            <div class="filter-row">
+                <div class="filter-item filter-item-grow">
+                    <label>关键词</label>
+                    <input type="text" name="keyword" placeholder="例如：医疗器械,生物医药,IVD" required>
+                </div>
+                <div class="filter-item">
+                    <label>分类</label>
+                    <select name="category">
+                        <option value="general">通用关键词</option>
+                        <option value="ivd">IVD 专业</option>
+                    </select>
+                </div>
+                <div class="filter-actions">
+                    <button type="submit" class="btn btn-primary">添加</button>
+                    <button type="reset" class="btn btn-ghost">清空</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</section>
+
+{% for category, items in grouped.items() %}
+<section class="panel">
+    <div class="panel-header">
+        <h2>
+            {{ category_labels.get(category, category) }}
+            <span class="header-count">{{ items|length }}</span>
+        </h2>
+    </div>
+    <div class="panel-body">
+        {% if items %}
+        <div class="keyword-cloud" data-category="{{ category }}">
+            {% for kw in items %}
+            <span class="keyword-chip" data-id="{{ kw.id }}">
+                <span class="keyword-text">{{ kw.keyword }}</span>
+                <button type="button" class="keyword-delete" data-id="{{ kw.id }}"
+                        data-name="{{ kw.keyword }}" title="删除">×</button>
+            </span>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-icon">∅</div>
+            <p>该分类下暂无关键词，可在上方添加。</p>
+        </div>
+        {% endif %}
+    </div>
+</section>
+{% endfor %}
+{% endblock %}

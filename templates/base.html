@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1024">
+    <title>{% block title %}政策信息监控{% endblock %} - 公共事务部信息爬取工具</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-icon">政</div>
+                <div class="logo-text">
+                    <div class="logo-title">政策信息监控</div>
+                    <div class="logo-sub">公共事务部</div>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                {% set active = active_page|default('') %}
+                <a href="{{ url_for('index') }}"
+                   class="nav-item {% if active == 'index' %}active{% endif %}">
+                    <span class="nav-icon">■</span>
+                    <span>仪表盘</span>
+                </a>
+                <a href="{{ url_for('results') }}"
+                   class="nav-item {% if active == 'results' %}active{% endif %}">
+                    <span class="nav-icon">≡</span>
+                    <span>爬取结果</span>
+                </a>
+                <a href="{{ url_for('keywords_page') }}"
+                   class="nav-item {% if active == 'keywords' %}active{% endif %}">
+                    <span class="nav-icon">#</span>
+                    <span>关键词管理</span>
+                </a>
+                <a href="{{ url_for('websites_page') }}"
+                   class="nav-item {% if active == 'websites' %}active{% endif %}">
+                    <span class="nav-icon">◎</span>
+                    <span>网址管理</span>
+                </a>
+                <a href="javascript:void(0)" id="nav-manual-crawl" class="nav-item">
+                    <span class="nav-icon">▶</span>
+                    <span>手动爬取</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div>v1.0.0</div>
+                <div class="muted">© 公共事务部</div>
+            </div>
+        </aside>
+
+        <main class="main">
+            <header class="page-header">
+                <h1 class="page-title">{% block page_title %}{{ self.title() }}{% endblock %}</h1>
+                <div class="page-actions">{% block page_actions %}{% endblock %}</div>
+            </header>
+            <section class="content">
+                {% block content %}{% endblock %}
+            </section>
+        </main>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
