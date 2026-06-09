@@ -1,0 +1,2 @@
+# Public-Affairs-Department-Policy-Information-Monitoring-Tool
+一个基于 Flask + APScheduler 的自动化政策信息监控与采集系统，覆盖国家、省、市三级政府网站，支持定时爬取、关键词过滤、仪表盘统计和 Web 管理后台。An automated policy information monitoring and collection system based on Flask + APScheduler, covering national, provincial, and municipal government websites. It supports scheduled crawling, keyword filtering, dashboard statistics, and a web management backend.
