@@ -183,6 +183,7 @@ def _run_crawl_task(task_id, websites, date_from=None, date_to=None):
                 'status': result.get('status') or 'success',
                 'count': result.get('inserted', result.get('total', 0)) or 0,
                 'total': result.get('total', 0) or 0,
+                'total_crawled': result.get('total_crawled', 0) or 0,
                 'time': f'{elapsed:.1f}s',
             }
             if result.get('error'):
@@ -202,6 +203,7 @@ def _run_crawl_task(task_id, websites, date_from=None, date_to=None):
                 'status': 'failed',
                 'count': 0,
                 'total': 0,
+                'total_crawled': 0,
                 'time': f'{elapsed:.1f}s',
                 'error': f'{type(exc).__name__}: {exc}',
             }

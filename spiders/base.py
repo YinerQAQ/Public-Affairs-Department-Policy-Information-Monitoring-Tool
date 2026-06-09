@@ -18,7 +18,7 @@ import logging
 import random
 from datetime import datetime
 from typing import List, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -27,6 +27,51 @@ from database import get_db
 
 
 logger = logging.getLogger(__name__)
+
+# 需要跳过的下载文件后缀（压缩包/办公文档/可执行文件等）。
+# 这类 URL 直接指向附件下载，不应进入文章解析流程。
+SKIP_EXTENSIONS = {
+    '.zip', '.rar', '.7z', '.tar', '.gz',
+    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+    '.exe', '.msi', '.dmg',
+}
+
+# 常见列表页/索引页 URL 片段。当 URL 命中且 content 非常短时，
+# 视为索引页直接跳过，避免把目录页错当文章入库。
+LIST_PAGE_PATTERNS = ['/list', '/index', '/catalog', '/category', '/column']
+
+# URL 黑名单：这些 URL 是栏目入口/列表页本身（标题可能命中关键词），
+# 不应作为文章保存到数据库，但仍会作为爬取入口被访问以获取其下子链接。
+# 例如四川省药监局的"医疗器械"分类列表页，标题恰好命中关键词，
+# 但页面本身只是子链接索引，不是政策文章本身。
+EXCLUDED_ARTICLE_URLS = {
+    'https://yjj.sc.gov.cn/scyjj/c103215/ylqx.shtml',
+}
+
+
+def _is_download_url(url: str) -> bool:
+    """判断 URL 是否指向下载文件（基于后缀名）"""
+    if not url:
+        return False
+    try:
+        path_lower = urlparse(url).path.lower()
+    except Exception:  # noqa: BLE001
+        path_lower = url.lower()
+    return any(path_lower.endswith(ext) for ext in SKIP_EXTENSIONS)
+
+
+def _looks_like_list_page(url: str, content: str) -> bool:
+    """判断疑似列表/索引页：URL 命中典型模式且正文极短。
+
+    注：如果 content 为空（很多列表页只取到 title+url），不在此处拦截，
+    交由其他逻辑放行；仅当确实拿到很短的 content 时才认定为列表页。
+    """
+    if not content:
+        return False
+    if len(content) >= 50:
+        return False
+    url_l = (url or '').lower()
+    return any(p in url_l for p in LIST_PAGE_PATTERNS)
 
 
 class SimpleResponse:
@@ -94,6 +139,8 @@ class BaseSpider:
         # 可选的日期范围过滤 (YYYY-MM-DD)，由调用方赋值
         self.date_from: Optional[str] = None
         self.date_to: Optional[str] = None
+        # 本次爬取过滤前抓到的原始文章数（用于进度面板展示"总爬取 X"）
+        self._last_total_crawled: int = 0
 
     # ------------------------------------------------------------------
     # 浏览器生命周期
@@ -491,12 +538,19 @@ class BaseSpider:
         """对 parse() 返回的原始结果做去重 + 关键词过滤 + 字段补齐。
 
         严格过滤：只有标题命中至少一个关键词的文章才会被保留并最终入库。
+        额外过滤：跳过下载文件链接（.zip/.pdf/.docx 等）以及疑似列表页。
         """
+        # 记录关键词过滤前的原始抓取数量，供进度面板"总爬取 X"展示
+        self._last_total_crawled = len(raw_articles or [])
+
         results: List[dict] = []
         seen_urls = set()
         total_raw = 0
         dropped_no_kw = 0
         dropped_date = 0
+        dropped_file = 0
+        dropped_list_page = 0
+        dropped_excluded = 0
         for art in raw_articles or []:
             total_raw += 1
             title = (art.get('title') or '').strip()
@@ -506,6 +560,27 @@ class BaseSpider:
             if url in seen_urls:
                 continue
             seen_urls.add(url)
+
+            # 跳过下载文件类 URL（zip/pdf/docx 等）
+            if _is_download_url(url):
+                dropped_file += 1
+                continue
+
+            # URL 黑名单：栏目入口页本身不作为文章入库（在关键词匹配之前判断，
+            # 避免因标题命中关键词而被计入"命中"数量），但其下子链接已由 parse 收集
+            if url in EXCLUDED_ARTICLE_URLS:
+                dropped_excluded += 1
+                continue
+
+            content = (art.get('content') or '').strip()
+            # 内容明显是列表/索引页（URL 模式命中 + 正文极短）则跳过
+            if _looks_like_list_page(url, content):
+                dropped_list_page += 1
+                continue
+            # 有 content 但长度过短，也视为列表页/无效页
+            if content and len(content) < 50:
+                dropped_list_page += 1
+                continue
 
             matched = self.match_keywords(title)
             if not matched:
@@ -532,8 +607,10 @@ class BaseSpider:
                 'level': self.level,
             })
         logger.info(
-            '[%s] 关键词过滤: 原始 %d 篇 -> 命中 %d 篇，无关键词丢弃 %d 篇，日期越界丢弃 %d 篇',
+            '[%s] 过滤统计: 原始 %d -> 命中 %d，无关键词 %d，日期越界 %d，'
+            '文件链接 %d，列表页 %d，黑名单 %d',
             self.name, total_raw, len(results), dropped_no_kw, dropped_date,
+            dropped_file, dropped_list_page, dropped_excluded,
         )
         return results
 
@@ -791,7 +868,8 @@ class BaseSpider:
         self._start_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         result = {
             'name': self.name,
-            'total': 0,
+            'total': 0,            # 关键词命中条数（过滤后）
+            'total_crawled': 0,    # 原始爬到的文章总数（关键词匹配前）
             'inserted': 0,
             'status': 'success',
             'error': None,
@@ -799,6 +877,7 @@ class BaseSpider:
         try:
             articles = self.crawl()
             result['total'] = len(articles)
+            result['total_crawled'] = self._last_total_crawled
             inserted = self.save_results(articles)
             result['inserted'] = inserted
             self.log_crawl('success', inserted)
@@ -807,6 +886,7 @@ class BaseSpider:
             logger.exception('[%s] 运行失败: %s', self.name, err)
             result['status'] = 'failed'
             result['error'] = err
+            result['total_crawled'] = self._last_total_crawled
             self.log_crawl('failed', 0, error_msg=err)
         finally:
             self.close()

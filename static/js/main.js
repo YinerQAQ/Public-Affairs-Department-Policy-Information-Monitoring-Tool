@@ -435,10 +435,21 @@
             (p.results || []).forEach(function (r) {
                 var iconCls = r.status === 'success' ? 'ok' : 'fail';
                 var icon = r.status === 'success' ? '✓' : '✗';
-                var countTxt = r.status === 'success'
-                    ? ('新增 ' + (r.count || 0) + ' 条'
-                       + (r.total ? ' / 解析 ' + r.total : ''))
-                    : ('失败：' + (r.error || '未知错误'));
+                var countTxt;
+                if (r.status === 'success') {
+                    var inserted = r.count || 0;
+                    var matched = r.total || 0;
+                    var crawled = r.total_crawled || 0;
+                    var parts = ['新增 ' + inserted + ' 条'];
+                    if (matched) parts.push('命中 ' + matched);
+                    // 仅在总爬取 > 0 且与命中不同时才额外展示
+                    if (crawled && crawled !== matched) {
+                        parts.push('总爬取 ' + crawled);
+                    }
+                    countTxt = parts.join(' / ');
+                } else {
+                    countTxt = '失败：' + (r.error || '未知错误');
+                }
                 html += '<li class="progress-result-item ' + iconCls + '">'
                     + '<span class="pri-icon">' + icon + '</span>'
                     + '<span class="pri-name">' + escapeHtml(r.name) + '</span>'
