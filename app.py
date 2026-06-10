@@ -4,15 +4,33 @@
 """
 
 import csv
+from datetime import datetime, timedelta
 import io
-import os
-import time
-import uuid
-import threading
 import logging
 from logging.handlers import TimedRotatingFileHandler
-from datetime import datetime, timedelta
 from math import ceil
+import os
+import threading
+import time
+import uuid
+
+from flask import Flask, Response, abort, jsonify, render_template, request, send_file
+
+from config import CRAWL_INTERVAL, KEYWORDS
+from database import (
+    add_keyword,
+    add_keywords_batch,
+    add_website,
+    delete_keyword,
+    delete_website,
+    get_db,
+    get_keywords,
+    get_keywords_grouped,
+    get_website,
+    get_websites,
+    init_db,
+    update_website,
+)
 
 # -------------------------------------------------------------------- #
 # 日志配置：控制台 + 文件，按天轮转，保留 30 天
@@ -52,26 +70,10 @@ if not any(isinstance(h, logging.StreamHandler)
 # 降低三方库日志级别
 logging.getLogger('urllib3').setLevel(logging.WARNING)
 logging.getLogger('playwright').setLevel(logging.WARNING)
-logging.getLogger('werkzeug').setLevel(logging.WARNING)
+logging.getLogger('werkzeug').setLevel(logging.INFO)
 logging.getLogger('apscheduler').setLevel(logging.WARNING)
 
-from flask import Flask, render_template, request, jsonify, abort, Response, send_file
 
-from config import KEYWORDS, CRAWL_INTERVAL
-from database import (
-    init_db,
-    get_db,
-    get_keywords,
-    get_keywords_grouped,
-    add_keyword,
-    add_keywords_batch,
-    delete_keyword,
-    get_websites,
-    get_website,
-    add_website,
-    update_website,
-    delete_website,
-)
 
 
 PER_PAGE = 20
@@ -979,4 +981,5 @@ if __name__ == '__main__':
     use_debug = os.environ.get('FLASK_DEBUG', '0') == '1'
     if not use_debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
         _start_background_scheduler()
+    print('\n  访问地址: http://127.0.0.1:5000\n')
     app.run(debug=use_debug, host='0.0.0.0', port=5000, use_reloader=use_debug)

@@ -16,7 +16,7 @@ MYSQL_CONFIG = {
     'host': '127.0.0.1',
     'port': 3306,
     'user': 'root',
-    'password': 'your_password',  # 部署时修改为真实密码
+    'password': 'root',  # 部署时修改为真实密码
     'database': 'paqu',
     'charset': 'utf8mb4',
 }

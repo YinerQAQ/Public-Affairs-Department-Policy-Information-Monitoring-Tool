@@ -15,7 +15,12 @@
 
 ## 快速开始
 
-### 免安装版本（推荐）
+### 一键启动（推荐）
+双击 `政策监控工具.exe`，自动启动服务并打开浏览器，无需任何命令行操作。
+
+> 注意：EXE 必须与 `python\` 目录、`app.py` 保持同层级
+
+### 免安装版本
 1. 解压整个文件夹
 2. 双击 `install.bat` 初始化
 3. 双击 `start.bat` 启动
@@ -24,6 +29,7 @@
 ### 数据库配置
 - **默认**：无需配置，自动使用 SQLite（data/paqu.db）
 - **MySQL**：修改 `config.py` 中的 `MYSQL_CONFIG`，填入 MySQL 连接信息
+- **MySQL 8.0 注意**：使用 `caching_sha2_password` 认证插件时，需要安装 `cryptography` 包（已包含在 `requirements.txt` 中）
 
 ## BAT 工具说明
 | 文件 | 说明 |

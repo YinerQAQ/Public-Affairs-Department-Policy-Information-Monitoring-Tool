@@ -8,3 +8,7 @@ logs/
 test_*.py
 *.log
 .env
+build/
+dist/
+*.spec
+*.exe
