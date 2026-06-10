@@ -6,8 +6,20 @@
 # 爬取间隔（小时）
 CRAWL_INTERVAL = 4
 
-# 数据库路径
+# SQLite 数据库路径（MySQL 不可用时的 fallback）
 DATABASE_PATH = 'data/paqu.db'
+
+# MySQL 数据库配置
+# 部署到服务器时请按实际情况修改 password 等字段。
+# 若该机器上没有可用的 MySQL，程序会自动回退到上面的 SQLite。
+MYSQL_CONFIG = {
+    'host': '127.0.0.1',
+    'port': 3306,
+    'user': 'root',
+    'password': 'your_password',  # 部署时修改为真实密码
+    'database': 'paqu',
+    'charset': 'utf8mb4',
+}
 
 # 网站配置列表
 WEBSITES = [

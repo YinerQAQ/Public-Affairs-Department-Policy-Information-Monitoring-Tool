@@ -1,0 +1,76 @@
+========================================
+MySQL 安装与配置指南
+========================================
+
+【Windows 服务器安装 MySQL】
+
+1. 下载 MySQL Installer
+   https://dev.mysql.com/downloads/installer/
+   选择 "mysql-installer-community" (约400MB)
+
+2. 安装时选择 "Server Only"
+
+3. 配置：
+   - 端口: 3306（默认）
+   - Root 密码: 设置一个密码（记住它！）
+   - Windows Service: 勾选（开机自启）
+
+4. 安装完成后，创建数据库：
+   打开 MySQL Command Line Client，输入密码后执行：
+   CREATE DATABASE paqu CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+   （注：本工具的 init_db() 也会自动 CREATE DATABASE IF NOT EXISTS，
+    所以这一步可以省略，只要 root 账号有建库权限即可）
+
+5. 修改项目配置：
+   打开 config.py，找到 MYSQL_CONFIG，修改 password 为你设的密码：
+
+   MYSQL_CONFIG = {
+       'host': '127.0.0.1',
+       'port': 3306,
+       'user': 'root',
+       'password': '你的密码',
+       'database': 'paqu',
+       'charset': 'utf8mb4',
+   }
+
+【验证安装】
+   双击 start.bat 启动应用，浏览器访问 http://127.0.0.1:5000，
+   如果首页正常打开且能看到网站列表/关键词，说明 MySQL 连接成功。
+
+   也可以查看 logs/app.log，启动时会有一行：
+   [INFO] database: 数据库后端：MySQL  127.0.0.1:3306/paqu
+
+【常用命令】
+   - 启动服务: net start mysql80
+   - 停止服务: net stop mysql80
+   - 登录:     mysql -u root -p
+   - 查看库:   show databases;
+   - 切换库:   use paqu;
+   - 查看表:   show tables;
+   - 查看数据: select count(*) from articles;
+
+【SQLite 兼容回退】
+   若机器上没有 MySQL 或连接失败，程序会自动回退到 SQLite，
+   数据会落到 data/paqu.db。日志中会显示：
+   [WARNING] database: MySQL 连接失败，将回退到 SQLite：...
+   [INFO]    database: 数据库后端：SQLite  data/paqu.db
+
+   生产环境推荐使用 MySQL；开发本机临时跑测试时回退到 SQLite 也能正常工作。
+
+【从 SQLite 迁移历史数据到 MySQL（可选）】
+   如果之前用 SQLite 跑过、想把 data/paqu.db 里的历史数据搬到 MySQL，
+   可以参考以下命令（需要安装 sqlite3 命令行工具）：
+
+   1) 导出 SQLite：
+      sqlite3 data/paqu.db ".dump articles" > articles.sql
+
+   2) 手工编辑 articles.sql：
+      - 删除 CREATE TABLE 语句（MySQL 中表已由 init_db 创建）
+      - 把 INSERT 中的 "INSERT INTO" 行保留即可
+      - 把单引号转义检查一下（SQLite 用 '' 表示单引号，MySQL 兼容）
+
+   3) 导入 MySQL：
+      mysql -u root -p paqu < articles.sql
+
+   生产环境一般不需要迁移，新部署直接从 0 开始爬即可。

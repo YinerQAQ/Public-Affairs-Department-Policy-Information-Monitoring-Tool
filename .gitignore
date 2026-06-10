@@ -4,6 +4,7 @@ __pycache__/
 *.pyc
 *.db
 output/
+logs/
 test_*.py
 *.log
 .env

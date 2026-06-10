@@ -161,19 +161,9 @@ class GaoXinTongSpider(BaseSpider):
                 slug = urllib.parse.quote(title)
                 url = f'https://www.cdhtqyfw.cn/#/zct?title={slug}'
 
-            tags = it.get('tags') or []
-            status = (it.get('status') or '').strip()
-            summary_parts = []
-            if status:
-                summary_parts.append(f'状态: {status}')
-            if tags:
-                summary_parts.append('标签: ' + '/'.join(tags))
-            if it.get('dateText'):
-                summary_parts.append(f'申报时间: {it["dateText"]}')
             articles.append({
                 'title': title,
                 'url': url,
                 'publish_date': self._to_iso_date(it.get('dateText') or ''),
-                'summary': ' | '.join(summary_parts),
             })
         return articles

@@ -50,7 +50,7 @@
                 </div>
                 <div class="filter-item filter-item-grow">
                     <label>关键词</label>
-                    <input type="text" name="keyword" placeholder="标题 / 摘要 / 匹配关键词"
+                    <input type="text" name="keyword" placeholder="标题 / 匹配关键词"
                            value="{{ filters.keyword }}">
                 </div>
                 <div class="filter-actions">
@@ -102,9 +102,6 @@
                         <a class="row-title" href="{{ item.url }}" target="_blank" rel="noopener">
                             {{ item.title }}
                         </a>
-                        {% if item.summary %}
-                        <div class="row-summary">{{ item.summary[:80] }}{% if item.summary|length > 80 %}…{% endif %}</div>
-                        {% endif %}
                     </td>
                     <td>{{ item.source_name or '-' }}</td>
                     <td>

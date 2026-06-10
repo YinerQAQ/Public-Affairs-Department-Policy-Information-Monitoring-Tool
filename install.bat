@@ -28,6 +28,11 @@ if errorlevel 1 (
 echo.
 echo ============================================
 echo    初始化完成！
+echo.
+echo    [数据库] 默认使用 SQLite（无需配置）
+echo    如需使用 MySQL，请修改 config.py 中的 MYSQL_CONFIG
+echo    参考：MySQL安装指南.txt
+echo.
 echo    运行 start.bat 启动应用
 echo    运行 crawl_now.bat 立即爬取并导出
 echo ============================================

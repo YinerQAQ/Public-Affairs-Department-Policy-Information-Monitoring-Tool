@@ -9,8 +9,51 @@ import os
 import time
 import uuid
 import threading
+import logging
+from logging.handlers import TimedRotatingFileHandler
 from datetime import datetime, timedelta
 from math import ceil
+
+# -------------------------------------------------------------------- #
+# 日志配置：控制台 + 文件，按天轮转，保留 30 天
+# -------------------------------------------------------------------- #
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+os.makedirs(LOG_DIR, exist_ok=True)
+
+_log_formatter = logging.Formatter(
+    '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+_file_handler = TimedRotatingFileHandler(
+    os.path.join(LOG_DIR, 'app.log'),
+    when='midnight',
+    interval=1,
+    backupCount=30,
+    encoding='utf-8',
+)
+_file_handler.setFormatter(_log_formatter)
+_file_handler.setLevel(logging.INFO)
+
+_console_handler = logging.StreamHandler()
+_console_handler.setFormatter(_log_formatter)
+_console_handler.setLevel(logging.INFO)
+
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.INFO)
+# 避免重复加入 handler（debug 重载会二次 import）
+if not any(isinstance(h, TimedRotatingFileHandler) for h in _root_logger.handlers):
+    _root_logger.addHandler(_file_handler)
+if not any(isinstance(h, logging.StreamHandler)
+           and not isinstance(h, TimedRotatingFileHandler)
+           for h in _root_logger.handlers):
+    _root_logger.addHandler(_console_handler)
+
+# 降低三方库日志级别
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('playwright').setLevel(logging.WARNING)
+logging.getLogger('werkzeug').setLevel(logging.WARNING)
+logging.getLogger('apscheduler').setLevel(logging.WARNING)
 
 from flask import Flask, render_template, request, jsonify, abort, Response, send_file
 
@@ -33,7 +76,7 @@ from database import (
 
 PER_PAGE = 20
 
-EXPORT_HEADERS = ['标题', '链接', '来源', '发布日期', '摘要',
+EXPORT_HEADERS = ['标题', '链接', '来源', '发布日期',
                   '匹配关键词', '爬取时间', '级别']
 
 
@@ -278,7 +321,6 @@ def _export_row_values(article):
         article.get('url') or '',
         article.get('source_name') or '',
         article.get('publish_date') or '',
-        article.get('summary') or '',
         article.get('matched_keywords') or '',
         article.get('crawl_time') or '',
         article.get('level') or '',
@@ -309,7 +351,7 @@ def _build_excel_bytes(rows):
         bottom=Side(style='thin'),
     )
     widths = {'A': 50, 'B': 40, 'C': 20, 'D': 12,
-              'E': 40, 'F': 30, 'G': 20, 'H': 8}
+              'E': 30, 'F': 20, 'G': 8}
 
     def _write_sheet(sheet, items):
         for col, header in enumerate(EXPORT_HEADERS, 1):
@@ -788,9 +830,9 @@ def _query_articles(filters=None, page=1, per_page=PER_PAGE, limit=None):  # noq
         where_parts.append('publish_date <= ?')
         params.append(filters['date_to'])
     if filters.get('keyword'):
-        where_parts.append('(title LIKE ? OR matched_keywords LIKE ? OR summary LIKE ?)')
+        where_parts.append('(title LIKE ? OR matched_keywords LIKE ?)')
         kw = f"%{filters['keyword']}%"
-        params.extend([kw, kw, kw])
+        params.extend([kw, kw])
 
     where_sql = ('WHERE ' + ' AND '.join(where_parts)) if where_parts else ''
 

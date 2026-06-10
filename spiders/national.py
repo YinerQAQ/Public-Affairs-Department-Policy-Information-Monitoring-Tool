@@ -103,7 +103,6 @@ def _generic_parse_list(soup: BeautifulSoup, base_url: str,
             'title': title,
             'url': full_url,
             'publish_date': publish_date,
-            'summary': '',
         })
         seen_urls.add(full_url)
 
@@ -123,7 +122,6 @@ def _generic_parse_list(soup: BeautifulSoup, base_url: str,
                 'title': title,
                 'url': full_url,
                 'publish_date': '',
-                'summary': '',
             })
             seen_urls.add(full_url)
 

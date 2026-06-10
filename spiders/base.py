@@ -307,7 +307,7 @@ class BaseSpider:
     def parse(self, response) -> List[dict]:
         """子类实现：解析列表页，返回文章字典列表
 
-        每个 dict 至少包含：title, url, publish_date, summary
+        每个 dict 至少包含：title, url, publish_date
         """
         raise NotImplementedError('子类必须实现 parse() 方法')
 
@@ -323,20 +323,25 @@ class BaseSpider:
         try:
             conn = get_db()
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE type='table' AND name='keywords'"
-            )
-            if cursor.fetchone():
+            try:
                 cursor.execute(
                     'SELECT keyword FROM keywords '
                     'WHERE keyword IS NOT NULL AND keyword != ""'
                 )
                 rows = cursor.fetchall()
                 for row in rows:
-                    kw = row[0] if not isinstance(row, dict) else row.get('keyword')
+                    if isinstance(row, dict):
+                        kw = row.get('keyword')
+                    else:
+                        try:
+                            kw = row['keyword']
+                        except Exception:  # noqa: BLE001
+                            kw = row[0]
                     if kw and kw not in keywords:
                         keywords.append(kw)
+            except Exception:  # noqa: BLE001
+                # 表不存在或查询失败，走 config 回退
+                pass
             conn.close()
         except Exception as exc:  # noqa: BLE001
             logger.warning('[%s] 从数据库读取关键词失败，回退到 config.KEYWORDS: %s',
@@ -355,11 +360,10 @@ class BaseSpider:
         logger.info('[%s] 已加载关键词 %d 个', self.name, len(keywords))
         return keywords
 
-    def match_keywords(self, title: str, summary: str = '') -> List[str]:
+    def match_keywords(self, title: str) -> List[str]:
         """匹配关键词，返回命中的关键词列表（不区分大小写）。
 
-        按用户要求，匹配仅基于文章标题；summary 参数保留是为了兼容旧调用方，
-        实际不参与判定。
+        按用户要求，匹配仅基于文章标题。
         """
         title = (title or '').strip()
         if not title:
@@ -474,28 +478,24 @@ class BaseSpider:
         try:
             conn = get_db()
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE type='table' AND name='websites'"
-            )
-            if cursor.fetchone():
+            try:
                 cursor.execute(
                     'SELECT * FROM websites WHERE name = ? LIMIT 1',
                     (self.name,),
                 )
                 row = cursor.fetchone()
-                conn.close()
-                if row:
-                    d = dict(row)
-                    raw_btns = d.get('buttons') or ''
-                    d['buttons'] = [
-                        b.strip()
-                        for b in str(raw_btns).replace('，', ',').split(',')
-                        if b.strip()
-                    ]
-                    return d
-            else:
-                conn.close()
+            except Exception:  # noqa: BLE001
+                row = None
+            conn.close()
+            if row:
+                d = dict(row)
+                raw_btns = d.get('buttons') or ''
+                d['buttons'] = [
+                    b.strip()
+                    for b in str(raw_btns).replace('，', ',').split(',')
+                    if b.strip()
+                ]
+                return d
         except Exception as exc:  # noqa: BLE001
             logger.warning('[%s] 读取数据库网站配置失败: %s', self.name, exc)
 
@@ -588,7 +588,6 @@ class BaseSpider:
                 dropped_no_kw += 1
                 continue
 
-            summary = (art.get('summary') or '').strip()
             publish_date = (art.get('publish_date') or '').strip()
 
             # 日期范围过滤
@@ -602,7 +601,6 @@ class BaseSpider:
                 'source_name': self.name,
                 'source_url': self.base_url,
                 'publish_date': publish_date,
-                'summary': summary,
                 'matched_keywords': matched,
                 'level': self.level,
             })
@@ -818,15 +816,14 @@ class BaseSpider:
                 cursor.execute(
                     '''INSERT INTO articles
                        (title, url, source_name, source_url, publish_date,
-                        summary, matched_keywords, crawl_time, level)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        matched_keywords, crawl_time, level)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
                     (
                         art.get('title', ''),
                         art.get('url', ''),
                         art.get('source_name', self.name),
                         art.get('source_url', self.base_url),
                         art.get('publish_date', ''),
-                        art.get('summary', ''),
                         matched_kw_str,
                         crawl_time,
                         art.get('level', self.level),

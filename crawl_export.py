@@ -127,7 +127,7 @@ def _fetch_articles():
     db = get_db()
     try:
         cursor = db.execute('''
-            SELECT title, url, source_name, publish_date, summary,
+            SELECT title, url, source_name, publish_date,
                    matched_keywords, crawl_time, level
             FROM articles
             ORDER BY crawl_time DESC, id DESC
@@ -138,7 +138,7 @@ def _fetch_articles():
     return rows
 
 
-HEADERS = ['标题', '链接', '来源', '发布日期', '摘要', '匹配关键词', '爬取时间', '级别']
+HEADERS = ['标题', '链接', '来源', '发布日期', '匹配关键词', '爬取时间', '级别']
 
 
 def _row_values(article):
@@ -148,7 +148,6 @@ def _row_values(article):
         article['url'],
         article['source_name'],
         article['publish_date'],
-        article['summary'],
         article['matched_keywords'],
         article['crawl_time'],
         article['level'],
@@ -208,7 +207,7 @@ def _export_excel(articles, output_dir, timestamp):
             # 列宽
             widths = {
                 'A': 50, 'B': 40, 'C': 20, 'D': 12,
-                'E': 40, 'F': 30, 'G': 20, 'H': 8,
+                'E': 30, 'F': 20, 'G': 8,
             }
             for col_letter, width in widths.items():
                 sheet.column_dimensions[col_letter].width = width

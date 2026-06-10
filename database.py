@@ -1,93 +1,346 @@
 # -*- coding: utf-8 -*-
 """
-数据库模块 - 使用 sqlite3 标准库管理数据持久化
+数据库模块
+
+优先使用 MySQL（pymysql），若 MySQL 不可用则自动回退到 SQLite。
+对外提供统一的连接包装器：
+- 上层代码继续使用 ``?`` 作为占位符，由包装器在 MySQL 后端自动翻译为 ``%s``。
+- ``cursor.fetchone() / fetchall()`` 返回的行对象同时支持
+  ``row['col']`` 与 ``dict(row)``（SQLite 借助 Row 工厂，MySQL 使用 DictCursor）。
 """
 
 import os
 import sqlite3
+import logging
 from datetime import datetime
 
 from config import DATABASE_PATH, KEYWORDS, WEBSITES
 
+logger = logging.getLogger(__name__)
+
+# ----------------------------------------------------------------------
+# 后端选择：MySQL 优先，pymysql 不可用或连不上时回退到 SQLite
+# ----------------------------------------------------------------------
+try:
+    from config import MYSQL_CONFIG  # type: ignore
+except Exception:  # noqa: BLE001
+    MYSQL_CONFIG = None
+
+try:
+    import pymysql
+    from pymysql.cursors import DictCursor
+    _PYMYSQL_OK = True
+except Exception:  # noqa: BLE001
+    pymysql = None
+    DictCursor = None
+    _PYMYSQL_OK = False
+
+# 当前使用的后端：'mysql' 或 'sqlite'，None 表示尚未探测
+_BACKEND = None
+
+# 统一的 IntegrityError 元组，便于 except 同时捕获两种后端的异常
+_INTEGRITY_ERRORS = [sqlite3.IntegrityError]
+if _PYMYSQL_OK:
+    try:
+        _INTEGRITY_ERRORS.append(pymysql.err.IntegrityError)
+    except Exception:  # noqa: BLE001
+        pass
+INTEGRITY_ERROR = tuple(_INTEGRITY_ERRORS)
+
+
+def _try_init_mysql():
+    """尝试连接 MySQL 并确保目标数据库存在；返回 True 表示可用。"""
+    if not (_PYMYSQL_OK and MYSQL_CONFIG):
+        return False
+    cfg = dict(MYSQL_CONFIG)
+    db_name = cfg.pop('database', 'paqu')
+    try:
+        conn = pymysql.connect(
+            host=cfg.get('host', '127.0.0.1'),
+            port=int(cfg.get('port', 3306)),
+            user=cfg.get('user', 'root'),
+            password=cfg.get('password', ''),
+            charset=cfg.get('charset', 'utf8mb4'),
+            connect_timeout=3,
+        )
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"CREATE DATABASE IF NOT EXISTS `{db_name}` "
+                    f"CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('MySQL 连接失败，将回退到 SQLite：%s', exc)
+        return False
+
+
+def _detect_backend():
+    """探测一次后端，并缓存结果。"""
+    global _BACKEND
+    if _BACKEND is not None:
+        return _BACKEND
+    if _try_init_mysql():
+        _BACKEND = 'mysql'
+        cfg = MYSQL_CONFIG or {}
+        logger.info(
+            '数据库后端：MySQL  %s:%s/%s',
+            cfg.get('host'), cfg.get('port'), cfg.get('database'),
+        )
+    else:
+        _BACKEND = 'sqlite'
+        logger.info('数据库后端：SQLite  %s', DATABASE_PATH)
+    return _BACKEND
+
+
+def get_backend():
+    """返回当前使用的后端名称。"""
+    return _detect_backend()
+
+
+# ----------------------------------------------------------------------
+# 连接 / 游标包装器
+# ----------------------------------------------------------------------
+class _Cursor:
+    """统一游标：MySQL 后端自动把 ``?`` 占位符翻译为 ``%s``。"""
+
+    def __init__(self, cursor, backend):
+        self._cursor = cursor
+        self._backend = backend
+
+    def _translate(self, sql):
+        if self._backend == 'mysql' and sql:
+            return sql.replace('?', '%s')
+        return sql
+
+    def execute(self, sql, params=None):
+        sql = self._translate(sql)
+        if params is None:
+            return self._cursor.execute(sql)
+        return self._cursor.execute(sql, params)
+
+    def executemany(self, sql, seq_of_params):
+        sql = self._translate(sql)
+        return self._cursor.executemany(sql, seq_of_params)
+
+    def fetchone(self):
+        return self._cursor.fetchone()
+
+    def fetchall(self):
+        return self._cursor.fetchall()
+
+    def fetchmany(self, size=None):
+        if size is None:
+            return self._cursor.fetchmany()
+        return self._cursor.fetchmany(size)
+
+    @property
+    def lastrowid(self):
+        return self._cursor.lastrowid
+
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+
+    def close(self):
+        try:
+            self._cursor.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def __iter__(self):
+        return iter(self._cursor)
+
+
+class _Connection:
+    """统一连接：兼容 sqlite3.Connection 与 pymysql.Connection 常用方法。"""
+
+    def __init__(self, conn, backend):
+        self._conn = conn
+        self._backend = backend
+
+    @property
+    def backend(self):
+        return self._backend
+
+    def cursor(self):
+        return _Cursor(self._conn.cursor(), self._backend)
+
+    def execute(self, sql, params=None):
+        cur = self.cursor()
+        cur.execute(sql, params)
+        return cur
+
+    def commit(self):
+        try:
+            self._conn.commit()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def rollback(self):
+        try:
+            self._conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def close(self):
+        try:
+            self._conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+
 
 def get_db():
-    """获取数据库连接（启用外键约束、Row 工厂便于按列名访问）"""
-    # 确保数据库目录存在
+    """获取数据库连接（统一包装器）。"""
+    backend = _detect_backend()
+    if backend == 'mysql':
+        cfg = dict(MYSQL_CONFIG or {})
+        conn = pymysql.connect(
+            host=cfg.get('host', '127.0.0.1'),
+            port=int(cfg.get('port', 3306)),
+            user=cfg.get('user', 'root'),
+            password=cfg.get('password', ''),
+            database=cfg.get('database', 'paqu'),
+            charset=cfg.get('charset', 'utf8mb4'),
+            cursorclass=DictCursor,
+            autocommit=False,
+        )
+        return _Connection(conn, 'mysql')
+
+    # SQLite fallback
     db_dir = os.path.dirname(DATABASE_PATH)
     if db_dir and not os.path.exists(db_dir):
         os.makedirs(db_dir, exist_ok=True)
-
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA foreign_keys = ON;')
-    return conn
+    return _Connection(conn, 'sqlite')
+
+
+# ----------------------------------------------------------------------
+# 建表 SQL（双后端）
+# ----------------------------------------------------------------------
+_MYSQL_TABLES = [
+    """
+    CREATE TABLE IF NOT EXISTS websites (
+        id              INT AUTO_INCREMENT PRIMARY KEY,
+        name            VARCHAR(200) NOT NULL,
+        url             VARCHAR(500) NOT NULL,
+        level           VARCHAR(20),
+        buttons         VARCHAR(500),
+        status          VARCHAR(20)  DEFAULT 'active',
+        last_crawl_time VARCHAR(30)
+    ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS articles (
+        id                INT AUTO_INCREMENT PRIMARY KEY,
+        title             VARCHAR(500) NOT NULL,
+        url               VARCHAR(1000) NOT NULL,
+        source_name       VARCHAR(200),
+        source_url        VARCHAR(500),
+        publish_date      VARCHAR(30),
+        summary           TEXT,
+        matched_keywords  VARCHAR(500),
+        crawl_time        VARCHAR(30),
+        level             VARCHAR(20),
+        INDEX idx_articles_source (source_name),
+        INDEX idx_articles_publish (publish_date),
+        INDEX idx_articles_url (url(255))
+    ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS crawl_logs (
+        id            INT AUTO_INCREMENT PRIMARY KEY,
+        website_name  VARCHAR(200) NOT NULL,
+        start_time    VARCHAR(30),
+        end_time      VARCHAR(30),
+        status        VARCHAR(20),
+        article_count INT DEFAULT 0,
+        error_message TEXT,
+        INDEX idx_logs_website (website_name)
+    ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS keywords (
+        id           INT AUTO_INCREMENT PRIMARY KEY,
+        keyword      VARCHAR(100) NOT NULL,
+        category     VARCHAR(30)  NOT NULL DEFAULT 'general',
+        created_time VARCHAR(30),
+        UNIQUE KEY uniq_keyword_category (keyword, category)
+    ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    """,
+]
+
+_SQLITE_TABLES = [
+    """
+    CREATE TABLE IF NOT EXISTS websites (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        name            TEXT    NOT NULL,
+        url             TEXT    NOT NULL,
+        level           TEXT,
+        buttons         TEXT,
+        status          TEXT    DEFAULT 'active',
+        last_crawl_time TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS articles (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        title             TEXT    NOT NULL,
+        url               TEXT    NOT NULL,
+        source_name       TEXT,
+        source_url        TEXT,
+        publish_date      TEXT,
+        summary           TEXT,
+        matched_keywords  TEXT,
+        crawl_time        TEXT,
+        level             TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS crawl_logs (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        website_name  TEXT    NOT NULL,
+        start_time    TEXT,
+        end_time      TEXT,
+        status        TEXT,
+        article_count INTEGER DEFAULT 0,
+        error_message TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS keywords (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        keyword      TEXT    NOT NULL,
+        category     TEXT    NOT NULL DEFAULT 'general',
+        created_time TEXT,
+        UNIQUE(keyword, category)
+    )
+    """,
+]
 
 
 def init_db():
-    """初始化数据库及全部数据表"""
+    """初始化数据库及全部数据表，并在首次启动时导入默认关键词与网站。"""
+    backend = _detect_backend()
     conn = get_db()
     cursor = conn.cursor()
 
-    # websites 表 - 监控网站列表
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS websites (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            name            TEXT    NOT NULL,
-            url             TEXT    NOT NULL,
-            level           TEXT,
-            buttons         TEXT,
-            status          TEXT    DEFAULT 'active',
-            last_crawl_time TEXT
-        )
-    ''')
-
-    # articles 表 - 抓取到的文章/政策
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS articles (
-            id                INTEGER PRIMARY KEY AUTOINCREMENT,
-            title             TEXT    NOT NULL,
-            url               TEXT    NOT NULL,
-            source_name       TEXT,
-            source_url        TEXT,
-            publish_date      TEXT,
-            summary           TEXT,
-            matched_keywords  TEXT,
-            crawl_time        TEXT,
-            level             TEXT
-        )
-    ''')
-
-    # crawl_logs 表 - 爬取任务日志
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS crawl_logs (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            website_name  TEXT    NOT NULL,
-            start_time    TEXT,
-            end_time      TEXT,
-            status        TEXT,
-            article_count INTEGER DEFAULT 0,
-            error_message TEXT
-        )
-    ''')
-
-    # keywords 表 - 关键词库（用户可在 UI 编辑）
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS keywords (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            keyword      TEXT    NOT NULL,
-            category     TEXT    NOT NULL DEFAULT 'general',
-            created_time TEXT,
-            UNIQUE(keyword, category)
-        )
-    ''')
-
+    table_sqls = _MYSQL_TABLES if backend == 'mysql' else _SQLITE_TABLES
+    for sql in table_sqls:
+        cursor.execute(sql)
     conn.commit()
 
-    # 首次启动时从 config.py 导入默认关键词
+    # 首次启动导入默认关键词
     cursor.execute('SELECT COUNT(*) AS c FROM keywords')
-    if cursor.fetchone()['c'] == 0:
+    row = cursor.fetchone()
+    if (row['c'] if row else 0) == 0:
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        for category, words in KEYWORDS.items():
+        for category, words in (KEYWORDS or {}).items():
             for word in words:
                 try:
                     cursor.execute(
@@ -95,14 +348,15 @@ def init_db():
                         'VALUES (?, ?, ?)',
                         (word, category, now),
                     )
-                except sqlite3.IntegrityError:
+                except INTEGRITY_ERROR:
                     pass
         conn.commit()
 
-    # 首次启动时从 config.py 导入默认网址
+    # 首次启动导入默认网址
     cursor.execute('SELECT COUNT(*) AS c FROM websites')
-    if cursor.fetchone()['c'] == 0:
-        for site in WEBSITES:
+    row = cursor.fetchone()
+    if (row['c'] if row else 0) == 0:
+        for site in (WEBSITES or []):
             cursor.execute(
                 'INSERT INTO websites (name, url, level, buttons, status) '
                 'VALUES (?, ?, ?, ?, ?)',
@@ -119,12 +373,11 @@ def init_db():
     conn.close()
 
 
-# ---------------------------------------------------------------- #
+# ----------------------------------------------------------------------
 # Websites CRUD
-# ---------------------------------------------------------------- #
-
+# ----------------------------------------------------------------------
 def get_websites():
-    """返回所有网站，按 id 排序。buttons 拆分为列表"""
+    """返回所有网站，按 id 排序，buttons 拆分为列表。"""
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute('SELECT * FROM websites ORDER BY id ASC')
@@ -133,7 +386,7 @@ def get_websites():
         d = dict(r)
         raw = d.get('buttons') or ''
         d['buttons_list'] = [
-            b.strip() for b in raw.replace('，', ',').split(',') if b.strip()
+            b.strip() for b in str(raw).replace('，', ',').split(',') if b.strip()
         ]
         rows.append(d)
     conn.close()
@@ -150,7 +403,7 @@ def get_website(website_id):
 
 
 def _normalize_buttons(buttons):
-    """将 list 或逗号分隔字符串转为逗号分隔字符串"""
+    """将 list 或逗号分隔字符串转为逗号分隔字符串。"""
     if isinstance(buttons, list):
         items = [str(b).strip() for b in buttons if str(b).strip()]
     else:
@@ -219,7 +472,7 @@ def delete_website(website_id):
 
 
 def article_exists(title, source, publish_date=None):
-    """检查文章是否已存在（按 标题 + 来源网站 [+ 发布日期] 判重）"""
+    """检查文章是否已存在（按 标题 + 来源网站 [+ 发布日期] 判重）。"""
     title = (title or '').strip()
     source = (source or '').strip()
     if not title or not source:
@@ -228,13 +481,13 @@ def article_exists(title, source, publish_date=None):
     try:
         if publish_date:
             cursor = conn.execute(
-                'SELECT 1 FROM articles WHERE title = ? AND source_name = ? '
+                'SELECT 1 AS x FROM articles WHERE title = ? AND source_name = ? '
                 'AND publish_date = ? LIMIT 1',
                 (title, source, publish_date),
             )
         else:
             cursor = conn.execute(
-                'SELECT 1 FROM articles WHERE title = ? AND source_name = ? LIMIT 1',
+                'SELECT 1 AS x FROM articles WHERE title = ? AND source_name = ? LIMIT 1',
                 (title, source),
             )
         return cursor.fetchone() is not None
@@ -243,7 +496,7 @@ def article_exists(title, source, publish_date=None):
 
 
 def update_website_crawl_status(name, status='success', last_crawl_time=None):
-    """供爬虫使用：更新某个网站的状态与最后爬取时间"""
+    """供爬虫使用：更新某个网站的状态与最后爬取时间。"""
     last_crawl_time = last_crawl_time or datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     conn = get_db()
     conn.execute(
@@ -255,7 +508,7 @@ def update_website_crawl_status(name, status='success', last_crawl_time=None):
 
 
 def get_keywords(category=None):
-    """读取关键词列表"""
+    """读取关键词列表。"""
     conn = get_db()
     cursor = conn.cursor()
     if category:
@@ -271,7 +524,7 @@ def get_keywords(category=None):
 
 
 def get_keywords_grouped():
-    """按分类分组返回 {category: [keyword,...]}"""
+    """按分类分组返回 {category: [keyword,...]}。"""
     grouped = {}
     for row in get_keywords():
         grouped.setdefault(row['category'], []).append(row['keyword'])
@@ -279,7 +532,7 @@ def get_keywords_grouped():
 
 
 def add_keyword(keyword, category='general'):
-    """添加单个关键词，返回 (success, message)"""
+    """添加单个关键词，返回 (success, message)。"""
     keyword = (keyword or '').strip()
     if not keyword:
         return False, '关键词不能为空'
@@ -294,14 +547,14 @@ def add_keyword(keyword, category='general'):
         )
         conn.commit()
         return True, '添加成功'
-    except sqlite3.IntegrityError:
+    except INTEGRITY_ERROR:
         return False, f'关键词 "{keyword}" 已存在'
     finally:
         conn.close()
 
 
 def add_keywords_batch(text, category='general'):
-    """批量添加（逗号或中文逗号分隔），返回统计信息"""
+    """批量添加（逗号或中文逗号分隔），返回统计信息。"""
     raw = (text or '').replace('，', ',')
     items = [s.strip() for s in raw.split(',') if s.strip()]
     added, skipped = [], []
@@ -315,7 +568,7 @@ def add_keywords_batch(text, category='general'):
 
 
 def delete_keyword(keyword_id):
-    """删除关键词"""
+    """删除关键词。"""
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM keywords WHERE id = ?', (keyword_id,))
@@ -327,4 +580,4 @@ def delete_keyword(keyword_id):
 
 if __name__ == '__main__':
     init_db()
-    print(f'数据库初始化完成: {DATABASE_PATH}')
+    print(f'数据库初始化完成（后端：{get_backend()}）')
