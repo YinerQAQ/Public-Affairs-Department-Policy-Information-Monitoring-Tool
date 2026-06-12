@@ -5,7 +5,8 @@ echo    部署到 Windows 服务器
 echo ============================================
 echo.
 
-cd /d "%~dp0"
+REM 切换到项目根目录（tools/ 的上一级）
+cd /d "%~dp0.."
 
 echo [1/3] 检查内置 Python 环境...
 if not exist "python\python.exe" (
@@ -43,7 +44,7 @@ echo ============================================
 echo    服务器部署完成！
 echo.
 echo    访问地址: http://本机IP:5000
-echo    停止服务: stop.bat
+echo    停止服务: tools\stop.bat
 echo    查看任务: schtasks /query /tn "PolicyMonitor"
 echo    删除自启: schtasks /delete /tn "PolicyMonitor" /f
 echo ============================================

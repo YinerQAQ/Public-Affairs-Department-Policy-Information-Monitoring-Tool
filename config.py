@@ -6,6 +6,11 @@
 # 爬取间隔（小时）
 CRAWL_INTERVAL = 4
 
+# 定时爬取开关
+# - False（默认）：本地分发版本，用户手动点击爬取按钮触发
+# - True：服务器部署时启用，按 CRAWL_INTERVAL 周期自动爬取
+ENABLE_SCHEDULER = False
+
 # SQLite 数据库路径（MySQL 不可用时的 fallback）
 DATABASE_PATH = 'data/paqu.db'
 

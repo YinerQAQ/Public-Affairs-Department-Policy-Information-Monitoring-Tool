@@ -5,7 +5,8 @@ echo 启动后请打开浏览器访问: http://127.0.0.1:5000
 echo 按 Ctrl+C 停止
 echo.
 
-cd /d "%~dp0"
+REM 切换到项目根目录（tools/ 的上一级）
+cd /d "%~dp0.."
 
 REM 让 Playwright 使用项目内置的浏览器
 set PLAYWRIGHT_BROWSERS_PATH=0

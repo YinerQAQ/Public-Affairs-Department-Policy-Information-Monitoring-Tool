@@ -16,7 +16,7 @@ import uuid
 
 from flask import Flask, Response, abort, jsonify, render_template, request, send_file
 
-from config import CRAWL_INTERVAL, KEYWORDS
+from config import CRAWL_INTERVAL, ENABLE_SCHEDULER, KEYWORDS
 from database import (
     add_keyword,
     add_keywords_batch,
@@ -979,7 +979,12 @@ if __name__ == '__main__':
     # debug 模式下，仅在 reloader 子进程中启动调度器（避免父子双开）
     # 非 debug 模式下，直接启动
     use_debug = os.environ.get('FLASK_DEBUG', '0') == '1'
-    if not use_debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-        _start_background_scheduler()
+    if ENABLE_SCHEDULER:
+        if not use_debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+            _start_background_scheduler()
+    else:
+        # 本地分发版本默认关闭定时爬取，用户通过 Web 面板手动触发
+        # 服务器部署时在 config.py 中将 ENABLE_SCHEDULER 设为 True
+        print('[scheduler] 定时爬取已关闭（ENABLE_SCHEDULER=False）')
     print('\n  访问地址: http://127.0.0.1:5000\n')
     app.run(debug=use_debug, host='0.0.0.0', port=5000, use_reloader=use_debug)

@@ -5,7 +5,8 @@ echo    立即爬取并导出
 echo ============================================
 echo.
 
-cd /d "%~dp0"
+REM 切换到项目根目录（tools/ 的上一级）
+cd /d "%~dp0.."
 
 REM 让 Playwright 使用项目内置的浏览器
 set PLAYWRIGHT_BROWSERS_PATH=0
